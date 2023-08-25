@@ -21,7 +21,7 @@ from langchain.memory import ConversationBufferWindowMemory
 # Environment Variables
 load_dotenv(find_dotenv())
 
-class FileChatBot:
+class CSVChatBot:
     def __init__(self, file_path):
         self.file_path = file_path
         self.configure_api()
@@ -118,7 +118,7 @@ if __name__ == '__main__':
     file_path = "./input/HondaCANACompleteData.csv"
     
     # Create a FileChatBot instance
-    chat_bot = FileChatBot(file_path)
+    chat_bot = CSVChatBot(file_path)
 
     # Starting the chat bot
     chat_bot.start_chat()

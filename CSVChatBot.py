@@ -39,14 +39,14 @@ class CSVChatBot:
         self.chat = self.get_conversation_chain()
 
     # Load File and Extract Raw Text
-    def get_raw_text(self):
+    def get_file_data(self):
         loader = CSVLoader(file_path=self.file_path)
         file_data = loader.load()
 
         return file_data
     
     def get_text_chunks(self):
-        file_data = self.get_raw_text()
+        file_data = self.get_file_data()
 
         # Split text into chunks
         text_splitter = RecursiveCharacterTextSplitter(
@@ -80,29 +80,37 @@ class CSVChatBot:
     # Creating Conversation cain
     def get_conversation_chain(self):
         llm = ChatOpenAI(temperature=0.0, model_kwargs={"engine": "GPT3-5"})
-        memory = ConversationBufferWindowMemory(memory_key="chat_history", k=10, return_messages=True)
-        chat = ConversationalRetrievalChain.from_llm(llm=llm, retriever=self.vectorstore.as_retriever(), memory=memory)
+        memory = ConversationBufferWindowMemory(memory_key="chat_history", k=10, input_key='question', output_key='answer', return_messages=True)
+        chat = ConversationalRetrievalChain.from_llm(llm=llm, retriever=self.vectorstore.as_retriever(), memory=memory, return_source_documents=True)
 
         return chat
     
-    def get_answer(self, question):
+    def get_result(self, question):
         result = self.chat({"question": question})
-        return result['answer']
+        return result
     
+    def print_result(self, result):
+        print("\n######### RESULT DETAILS ###########")
+        print("Result: " + result['answer'], end="\n"*2)
+
+        print("######### CHUNKS DETAILS ###########")
+        for index, source in enumerate(result['source_documents']):
+            print(f"######### {index+1} CHUNK DETAILS ###########")
+            # print(f"{index} Chunk Detail content:")
+            print("Chunk Content: ", source.page_content, end='\n'*2)
+            print("Source File: ", source.metadata['source'],  end='\n'*2)
+            print("Row Number: ", source.metadata['row'], end="\n"*2)
+
     # Starting Q&A
     def start_chat(self):
         while(True):
             question = input('Ask a question about your documents (or type "exit" to quit): ')
             if(question.lower() == 'exit'): break
 
-            # Similar Chunks Metadata
-            similary_chunks = self.vectorstore.similarity_search(question)
-            for chunk in similary_chunks:
-                print("Source File: " , chunk.metadata['source'])
-                print("Row Number: " , chunk.metadata['row'], end="\n"*2)
+            result = self.get_result(question)
+            self.print_result(result)
 
-            result = self.get_answer(question)
-            print("Result: " + result, end="\n"*2)
+
 
 
 

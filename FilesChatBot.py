@@ -44,10 +44,10 @@ class FilesChatBot:
 
     # Load File and Extract Raw Text
     def get_file_data(self):
-        loader = DirectoryLoader(folder_path, glob='**/*.csv', loader_cls=CSVLoader)
+        loader = DirectoryLoader(self.folder_path, glob='**/*.csv', loader_cls=CSVLoader)
         files_data = loader.load()
 
-        loader = DirectoryLoader(folder_path, glob='**/*.pdf', loader_cls=PyPDFLoader)
+        loader = DirectoryLoader(self.folder_path, glob='**/*.pdf', loader_cls=PyPDFLoader)
         files_data += loader.load()
         
         return files_data

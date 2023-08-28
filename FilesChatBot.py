@@ -1,8 +1,8 @@
 """
 Author : Anuj Maurya
-Description: FileChatBot allow to ask question regarding a CSV file.
+Description: FileChatBot allow to ask question regarding files.
 Version : 1.0
-Date: 24-08-2023
+Date: 28-08-2023
 Azure Ticket Link : https://dev.azure.com/Generative-AI-Training/GenerativeAI/_workitems/edit/39/
 
 """

@@ -9,6 +9,8 @@ Azure Ticket Link : https://dev.azure.com/Generative-AI-Training/GenerativeAI/_w
 
 import os
 import openai
+import weaviate
+from langchain.vectorstores import Weaviate
 from langchain.vectorstores import FAISS
 from dotenv import load_dotenv, find_dotenv
 from langchain.chat_models import ChatOpenAI
@@ -39,7 +41,7 @@ class FilesChatBot:
         openai.api_version= os.getenv("API_VERSION")
     
     def components_initialize(self):
-        self.vectorstore = self.get_vector_db()
+        self.vectorstore = self.get_vector_db_weaviate()
         self.chat = self.get_conversation_chain()
 
     # Load File and Extract Raw Text
@@ -84,6 +86,20 @@ class FilesChatBot:
         
         return vectorstore
     
+    def get_vector_db_weaviate(self):
+        file_chunks = self.get_text_chunks()
+
+        # all-MiniLM-L6-v2(DIMENSION): 384
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+        WEAVIATE_URL = os.getenv('WEAVIATE_URL')
+        WEAVIATE_API_KEY = os.getenv('WEAVIATE_API_KEY')
+        client = weaviate.Client(url=WEAVIATE_URL, auth_client_secret=weaviate.AuthApiKey(WEAVIATE_API_KEY))
+
+
+        vectorstore = Weaviate.from_documents(documents=file_chunks, client=client, embedding=embeddings, by_text=False)
+        return vectorstore
+
 
     # Creating Conversation cain
     def get_conversation_chain(self):

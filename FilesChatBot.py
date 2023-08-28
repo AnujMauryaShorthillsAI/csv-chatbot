@@ -9,9 +9,8 @@ Azure Ticket Link : https://dev.azure.com/Generative-AI-Training/GenerativeAI/_w
 
 import os
 import openai
-import weaviate
-from langchain.vectorstores import Weaviate
-from langchain.vectorstores import FAISS
+import pinecone
+from langchain.vectorstores import Pinecone
 from dotenv import load_dotenv, find_dotenv
 from langchain.chat_models import ChatOpenAI
 from langchain.document_loaders import PyPDFLoader
@@ -26,10 +25,11 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 load_dotenv(find_dotenv())
 
 class FilesChatBot:
-    def __init__(self, folder_path, similarity_search_size, chat_history_size):
+    def __init__(self, folder_path, similarity_search_size, chat_history_size, index_name):
         self.folder_path = folder_path
         self.similarity_search_size = similarity_search_size
         self.chat_history_size = chat_history_size
+        self.index_name = index_name
         self.configure_api()
         self.components_initialize()
 
@@ -41,8 +41,15 @@ class FilesChatBot:
         openai.api_version= os.getenv("API_VERSION")
     
     def components_initialize(self):
-        self.vectorstore = self.get_vector_db_weaviate()
+        # Initialize Pin Cone
+        pinecone.init(
+            api_key=os.getenv("PINECONE_API_KEY"),  # find at app.pinecone.io
+            environment=os.getenv("PINECONE_ENV"),  # next to api key in console
+        )
+
+        self.vectorstore = self.get_vector_db()
         self.chat = self.get_conversation_chain()
+
 
     # Load File and Extract Raw Text
     def get_file_data(self):
@@ -68,37 +75,26 @@ class FilesChatBot:
         return text_splitter.split_documents(files_data)
     
     
-    # Saving and Loading vector db
     def get_vector_db(self):
         file_chunks = self.get_text_chunks()
 
         # all-MiniLM-L6-v2(DIMENSION): 384
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-        # create, load and save vector
-        try:
-            vectorstore = FAISS.load_local("faiss_index", embeddings)
-        except:
-            vectorstore = FAISS.from_documents(documents=file_chunks, embedding=embeddings)
-
-            # Save vector store
-            vectorstore.save_local("faiss_index")
         
-        return vectorstore
-    
-    def get_vector_db_weaviate(self):
-        file_chunks = self.get_text_chunks()
-
-        # all-MiniLM-L6-v2(DIMENSION): 384
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-        WEAVIATE_URL = os.getenv('WEAVIATE_URL')
-        WEAVIATE_API_KEY = os.getenv('WEAVIATE_API_KEY')
-        client = weaviate.Client(url=WEAVIATE_URL, auth_client_secret=weaviate.AuthApiKey(WEAVIATE_API_KEY))
-
-
-        vectorstore = Weaviate.from_documents(documents=file_chunks, client=client, embedding=embeddings, by_text=False)
-        return vectorstore
+        
+        # First, check if our index already exists. If it doesn't, we create it
+        if self.index_name not in pinecone.list_indexes():
+            # we create a new index
+            pinecone.create_index(
+                name=self.index_name,
+                metric='cosine',
+                dimension=384  
+            )
+        
+            Pinecone.from_documents(file_chunks, embeddings, index_name=self.index_name)
+        
+        return Pinecone.from_existing_index(self.index_name, embedding=embeddings)
+            
 
 
     # Creating Conversation cain
@@ -159,14 +155,17 @@ if __name__ == '__main__':
         1. what is the horsepower of Passport SPORT?
         2. what is the engine displacement of Civic LX?
         3. what's the joining date?
-        3. What will be the working hours?
+        4. What will be the working hours?
     """
 
     # Path to Folder
     folder_path = "./input"
     
     # Create a FileChatBot instance
-    chat_bot = FilesChatBot(folder_path, 7, 10)
+    chat_bot = FilesChatBot(folder_path, 
+                            similarity_search_size=7, 
+                            chat_history_size=10,
+                            index_name='files-chat-bot') # if not getting desired result, try increasing similarity_search_size
 
     # Starting the chat bot
     chat_bot.start_chat()

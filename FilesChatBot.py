@@ -14,6 +14,7 @@ from langchain.vectorstores import Weaviate
 from dotenv import load_dotenv, find_dotenv
 from langchain.chat_models import ChatOpenAI
 from langchain.document_loaders import PyPDFLoader
+from langchain.callbacks import get_openai_callback
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.document_loaders import DirectoryLoader
 from langchain.chains import ConversationalRetrievalChain
@@ -45,10 +46,10 @@ class FilesChatBot:
 
     # Load File and Extract Raw Text
     def get_file_data(self):
-        loader = DirectoryLoader(folder_path, glob='**/*.csv', loader_cls=CSVLoader)
+        loader = DirectoryLoader(self.folder_path, glob='**/*.csv', loader_cls=CSVLoader)
         files_data = loader.load()
 
-        loader = DirectoryLoader(folder_path, glob='**/*.pdf', loader_cls=PyPDFLoader)
+        loader = DirectoryLoader(self.folder_path, glob='**/*.pdf', loader_cls=PyPDFLoader)
         files_data += loader.load()
         
         return files_data
@@ -83,7 +84,12 @@ class FilesChatBot:
 
     # Creating Conversation cain
     def get_conversation_chain(self):
-        llm = ChatOpenAI(temperature=0.0, model_kwargs={"engine": "GPT3-5"})
+        llm = ChatOpenAI(temperature=0.0, 
+                         model_kwargs={"engine": "GPT3-5"},
+                         headers={
+                             "Helicone-Auth": os.getenv('HELICONE_AUTH_KEY'),
+                             "Helicone-User-Id": os.getenv('HELICONE_USER_ID')
+                         })
 
         # Storing K Previous Chats
         memory = ConversationBufferWindowMemory(
@@ -102,7 +108,11 @@ class FilesChatBot:
         return chat
     
     def get_result(self, question):
-        result = self.chat({"question": question})
+        with get_openai_callback() as cb:
+            result = self.chat({"question": question})
+            print(cb.total_tokens)
+            LLMUsage.add_usage_details(cb)
+        
         return result
     
     def print_result(self, result):
@@ -122,9 +132,13 @@ class FilesChatBot:
     # Starting Q&A
     def start_chat(self):
         while(True):
-            question = input('Ask a question about your documents (or type "exit" to quit): ')
+            question = input('Ask a question about your documents (or type "exit" to quit / or type "update db" to load files): ')
             if(question.lower() == 'exit'): break
-
+            if(question.lower() == 'update db'):
+                accept = input('Warning: VectorDB will be updated with current input files. To Confirm Press "y": ')
+                if(accept.lower() == 'y'):
+                    self.__update_vector_db()
+                continue
             result = self.get_result(question)
             self.print_result(result)
 
@@ -138,15 +152,15 @@ if __name__ == '__main__':
     Question Examples: 
         1. what is the horsepower of Passport SPORT?
         2. what is the engine displacement of Civic LX?
-        3. what's the joining date?
-        3. What will be the working hours?
+        3. What is the joining date mentioned in my offer letter?
+        4. What will be the working hours?
     """
 
     # Path to Folder
     folder_path = "./input"
     
     # Create a FileChatBot instance
-    chat_bot = FilesChatBot(folder_path, 7, 10)
+    chat_bot = FilesChatBot(folder_path, 4, 10)
 
     # Starting the chat bot
     chat_bot.start_chat()

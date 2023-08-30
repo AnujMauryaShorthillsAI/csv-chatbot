@@ -10,7 +10,7 @@ Azure Ticket Link : https://dev.azure.com/Generative-AI-Training/GenerativeAI/_w
 import os
 import openai
 import weaviate
-from LLMUsage import LLMUsage
+from utils.LLMUsage import LLMUsage
 from langchain.vectorstores import Weaviate
 from dotenv import load_dotenv, find_dotenv
 from langchain.chat_models import ChatOpenAI

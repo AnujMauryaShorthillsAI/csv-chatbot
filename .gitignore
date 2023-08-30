@@ -3,3 +3,5 @@
 /venv
 /input
 /daily_llm_usage
+/__pycache__
+test.py

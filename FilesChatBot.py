@@ -10,6 +10,7 @@ Azure Ticket Link : https://dev.azure.com/Generative-AI-Training/GenerativeAI/_w
 import os
 import openai
 import weaviate
+from LLMUsage import LLMUsage
 from langchain.vectorstores import Weaviate
 from dotenv import load_dotenv, find_dotenv
 from langchain.chat_models import ChatOpenAI
@@ -26,24 +27,30 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 load_dotenv(find_dotenv())
 
 class FilesChatBot:
-    def __init__(self, folder_path, similarity_search_size, chat_history_size):
+    def __init__(self, folder_path, similarity_search_size, chat_history_size, index_name):
         self.folder_path = folder_path
         self.similarity_search_size = similarity_search_size
         self.chat_history_size = chat_history_size
+        self.index_name = index_name
+
         self.configure_api()
         self.components_initialize()
 
-    # Set up OpenAI API configuration
+    # Set up OpenAI/Weaviate API configuration
     def configure_api(self):
         openai.api_type= os.getenv('API_TYPE')
         openai.api_key = os.getenv('OPENAI_API_KEY')
         openai.api_base = os.getenv('OPENAI_API_BASE')
         openai.api_version= os.getenv("API_VERSION")
+
+        self.client = weaviate.Client(url=os.getenv('WEAVIATE_URL'), 
+                                 auth_client_secret=weaviate.AuthApiKey(os.getenv('WEAVIATE_API_KEY')))
     
+    # Initialize Components
     def components_initialize(self):
         self.vectorstore = self.get_vector_db()
         self.chat = self.get_conversation_chain()
-
+    
     # Load File and Extract Raw Text
     def get_file_data(self):
         loader = DirectoryLoader(self.folder_path, glob='**/*.csv', loader_cls=CSVLoader)
@@ -54,10 +61,10 @@ class FilesChatBot:
         
         return files_data
     
+    # Split text into chunks
     def get_text_chunks(self):
         files_data = self.get_file_data()
 
-        # Split text into chunks
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
@@ -67,20 +74,33 @@ class FilesChatBot:
 
         return text_splitter.split_documents(files_data)
     
-       
+    # Prepare VectorDB 
     def get_vector_db(self):
-        file_chunks = self.get_text_chunks()
+        # all-MiniLM-L6-v2(DIMENSION): 384
+        embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+        if(not self.client.schema.exists(self.index_name)):
+            print("######### Creating VectorDB #########")
+            file_chunks = self.get_text_chunks()
+            return Weaviate.from_documents(documents=file_chunks, index_name=self.index_name, client=self.client, embedding=embedding, by_text=False)
+        
+        print("######### Using Existing VectorDB #########")
+        return Weaviate(self.client, self.index_name, embedding=embedding, attributes=['source','row'], text_key='text', by_text=False)
+    
+    # Update Vector DB With New Files.
+    def __update_vector_db(self):
+        # Clear Vector DB
+        self.client.schema.delete_class(self.index_name)
 
         # all-MiniLM-L6-v2(DIMENSION): 384
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-        WEAVIATE_URL = os.getenv('WEAVIATE_URL')
-        WEAVIATE_API_KEY = os.getenv('WEAVIATE_API_KEY')
-        client = weaviate.Client(url=WEAVIATE_URL, auth_client_secret=weaviate.AuthApiKey(WEAVIATE_API_KEY))
-        
-        vectorstore = Weaviate.from_documents(documents=file_chunks, client=client, embedding=embeddings, by_text=False)
-        return vectorstore
+        # Update VectorDB
+        file_chunks = self.get_text_chunks()
+        Weaviate.from_documents(documents=file_chunks, index_name=self.index_name, client=self.client, embedding=embedding, by_text=False)
 
+        # Reinitialize Components
+        self.components_initialize()
 
     # Creating Conversation cain
     def get_conversation_chain(self):
@@ -99,7 +119,7 @@ class FilesChatBot:
             output_key='answer', 
             return_messages=True)
 
-        # Retrieving of Top 7 Similarity Search
+        # Retrieving of Top 4 (By Default) Similar Search
         chat = ConversationalRetrievalChain.from_llm(
             llm=llm, 
             retriever=self.vectorstore.as_retriever(search_kwargs={"k": self.similarity_search_size}), 
@@ -107,14 +127,17 @@ class FilesChatBot:
 
         return chat
     
+    # Returns Query Result
     def get_result(self, question):
         with get_openai_callback() as cb:
             result = self.chat({"question": question})
-            print(cb.total_tokens)
+            
+            # Adding LLM Usage Details
             LLMUsage.add_usage_details(cb)
         
         return result
     
+    # Prints Result
     def print_result(self, result):
         print("######### CHUNKS DETAILS ###########")
         for index, source in enumerate(result['source_documents']):
@@ -132,7 +155,7 @@ class FilesChatBot:
     # Starting Q&A
     def start_chat(self):
         while(True):
-            question = input('Ask a question about your documents (or type "exit" to quit / or type "update db" to load files): ')
+            question = input('Ask a question about your documents (or type "exit" to quit / or type "update db" to load new files): ')
             if(question.lower() == 'exit'): break
             if(question.lower() == 'update db'):
                 accept = input('Warning: VectorDB will be updated with current input files. To Confirm Press "y": ')
@@ -144,14 +167,12 @@ class FilesChatBot:
 
 
 
-
-
 # Driving Code
 if __name__ == '__main__':
     """
     Question Examples: 
-        1. what is the horsepower of Passport SPORT?
-        2. what is the engine displacement of Civic LX?
+        1. What is the horsepower of Passport SPORT?
+        2. What is the engine displacement of Civic LX?
         3. What is the joining date mentioned in my offer letter?
         4. What will be the working hours?
     """
@@ -160,7 +181,8 @@ if __name__ == '__main__':
     folder_path = "./input"
     
     # Create a FileChatBot instance
-    chat_bot = FilesChatBot(folder_path, 4, 10)
+    INDEX_NAME = 'FilesData'
+    chat_bot = FilesChatBot(folder_path, 4, 10, INDEX_NAME)
 
     # Starting the chat bot
     chat_bot.start_chat()

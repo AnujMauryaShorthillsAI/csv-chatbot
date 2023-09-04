@@ -52,18 +52,17 @@ class FilesChatBot:
         self.chat = self.get_conversation_chain()
     
     # Load File and Extract Raw Text
-    def get_file_data(self):
-        loader = DirectoryLoader(self.folder_path, glob='**/*.csv', loader_cls=CSVLoader)
-        files_data = loader.load()
-
-        loader = DirectoryLoader(self.folder_path, glob='**/*.pdf', loader_cls=PyPDFLoader)
-        files_data += loader.load()
-        
-        return files_data
+    def get_file_data(self, filename):
+        if filename.endswith('.csv'):
+            loader = CSVLoader(os.path.join(self.folder_path, filename))
+            return loader.load()
+        elif filename.endswith('.pdf'):
+            loader = PyPDFLoader(os.path.join(self.folder_path, filename))
+            return loader.load()
     
     # Split text into chunks
-    def get_text_chunks(self):
-        files_data = self.get_file_data()
+    def get_text_chunks(self, filename):
+        file_data = self.get_file_data(filename)
 
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -72,33 +71,38 @@ class FilesChatBot:
             length_function=len
         )
 
-        return text_splitter.split_documents(files_data)
+        return text_splitter.split_documents(file_data)
     
     # Prepare VectorDB 
     def get_vector_db(self):
         # all-MiniLM-L6-v2(DIMENSION): 384
         embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-        if(not self.client.schema.exists(self.index_name)):
-            print("######### Creating VectorDB #########")
-            file_chunks = self.get_text_chunks()
-            return Weaviate.from_documents(documents=file_chunks, index_name=self.index_name, client=self.client, embedding=embedding, by_text=False)
+        vector_store = Weaviate(self.client, self.index_name, embedding=embedding, attributes=['source','row'], text_key='text', by_text=False)
+
+        if(not os.path.exists('file_logs.txt')):
+            with open('file_logs.txt', 'x') as file:
+                pass
         
-        print("######### Using Existing VectorDB #########")
-        return Weaviate(self.client, self.index_name, embedding=embedding, attributes=['source','row'], text_key='text', by_text=False)
+        with open('file_logs.txt', '+r') as file_logs:
+            curr_files = os.listdir(self.folder_path)
+            uploaded_files = [line[:-1] for line in file_logs.readlines()]
+
+            for file in curr_files:
+                if not file in uploaded_files:
+                    text_chunks = self.get_text_chunks(file)
+                    vector_store.add_documents(text_chunks)
+                    file_logs.write(f'{file}\n')
+        
+        return vector_store
     
     # Update Vector DB With New Files.
     def __update_vector_db(self):
         # Clear Vector DB
         self.client.schema.delete_class(self.index_name)
 
-        # all-MiniLM-L6-v2(DIMENSION): 384
-        embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-        # Update VectorDB
-        file_chunks = self.get_text_chunks()
-        Weaviate.from_documents(documents=file_chunks, index_name=self.index_name, client=self.client, embedding=embedding, by_text=False)
-
+        os.remove("file_logs.txt")
+        
         # Reinitialize Components
         self.components_initialize()
 
@@ -124,7 +128,8 @@ class FilesChatBot:
             llm=llm, 
             retriever=self.vectorstore.as_retriever(search_kwargs={"k": self.similarity_search_size}), 
             memory=memory, return_source_documents=True)
-
+        
+        chat.memory
         return chat
     
     # Returns Query Result
